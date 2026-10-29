@@ -110,7 +110,15 @@ def fetch_candidates(report):
             dedup[url]["name"] = row["name"]
     rows = list(dedup.values())
     report["candidate_limit_applied_to_probing"] = MAX_CANDIDATES
-    probe_rows = rows[:MAX_CANDIDATES]
+    if len(rows) <= MAX_CANDIDATES:
+        probe_rows = rows
+    elif MAX_CANDIDATES == 1:
+        probe_rows = [rows[0]]
+    else:
+        # Spread the bounded probe budget across the whole source list instead of
+        # probing only alphabetically early channel names every day.
+        indexes = sorted({round(i * (len(rows) - 1) / (MAX_CANDIDATES - 1)) for i in range(MAX_CANDIDATES)})
+        probe_rows = [rows[i] for i in indexes]
     report["source_candidates_total"] = len(found)
     report["unique_candidates"] = len(dedup)
     report["candidates_processed"] = len(probe_rows)
@@ -212,7 +220,7 @@ def main():
         "technical_pass_count": len(technical_pass),
         "pending_local_review_count": len(all_candidates),
         "output_files": ["all_candidates.m3u", "technical_pass.m3u", "candidates.csv", "report.json"],
-        "csv_scope": "first candidates_processed entries selected for technical probing",
+        "csv_scope": "deterministic evenly distributed sample selected for technical probing",
         "all_candidates_m3u_scope": "all unique playlist URLs collected from configured sources",
     })
     (OUT / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
