@@ -52,6 +52,34 @@ class PlaylistParsingTests(unittest.TestCase):
         )
         self.assertEqual(rows[0]["name"], "Example HD")
 
+    def test_selected_hls_variant_replaces_master_url(self):
+        row = {"url": "https://example.org/master.m3u8"}
+        probes = [
+            {"technical_status": "pass", "height": 720, "width": 1280,
+             "variant_bandwidth": 2500000, "variant_url": "https://example.org/720.m3u8"},
+            {"technical_status": "pass", "height": 1080, "width": 1920,
+             "variant_bandwidth": 5000000, "variant_url": "https://example.org/1080.m3u8"},
+        ]
+        collector.apply_selected_probe(row, probes, "hls_master")
+        self.assertEqual(row["url"], "https://example.org/1080.m3u8")
+        self.assertEqual(row["technical_status"], "pass")
+
+    def test_selected_html_manifest_replaces_wrapper_page(self):
+        row = {"url": "https://example.org/watch"}
+        probes = [{"technical_status": "pass", "height": 720, "width": 1280,
+                   "variant_url": "https://cdn.example.org/live.m3u8"}]
+        collector.apply_selected_probe(row, probes, "html_page")
+        self.assertEqual(row["url"], "https://cdn.example.org/live.m3u8")
+        self.assertIn("embedded media manifest", row["technical_reason"])
+
+    def test_failed_variant_does_not_overwrite_source_url(self):
+        row = {"url": "https://example.org/master.m3u8"}
+        probes = [{"technical_status": "unreachable_or_unreadable",
+                   "technical_reason": "timeout", "variant_url": "https://example.org/720.m3u8"}]
+        collector.apply_selected_probe(row, probes, "hls_master")
+        self.assertEqual(row["url"], "https://example.org/master.m3u8")
+        self.assertEqual(row["variant_probe_count"], 1)
+
     def test_resolution_gate_is_strict(self):
         self.assertGreaterEqual(collector.MIN_WIDTH, 1280)
         self.assertGreaterEqual(collector.MIN_HEIGHT, 720)
