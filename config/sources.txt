@@ -1,0 +1,3 @@
+# One public M3U/M3U8 playlist URL per line.
+# GitHub Actions runners may access sources that are unavailable from your local network.
+https://iptv-org.github.io/iptv/index.m3u
