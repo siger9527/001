@@ -9,6 +9,7 @@ on:
       - "collector.py"
       - "url_policy.py"
       - "resource_sniffer.py"
+      - "local_iptv_server.py"
       - "tests/**"
       - ".github/workflows/test.yml"
   workflow_dispatch:
@@ -28,6 +29,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Compile Python modules
-        run: python -m compileall -q collector.py url_policy.py resource_sniffer.py tests
+        run: python -m compileall -q collector.py url_policy.py resource_sniffer.py local_iptv_server.py tests
       - name: Run regression suite
         run: python -m unittest discover -s tests -v
