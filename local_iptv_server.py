@@ -82,6 +82,7 @@ def playlist(approved_only=False):
     rows=list_candidates("approved" if approved_only else "")
     out=["#EXTM3U"]
     for r in rows:
+        if r["status"] == "rejected": continue
         if approved_only and r["status"]!="approved": continue
         out.extend(['#EXTINF:-1,'+r["name"].replace("\r"," ").replace("\n"," "),r["url"]])
     return "\n".join(out)+"\n"
