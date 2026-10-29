@@ -71,7 +71,7 @@ def parse_hls_variants(text: str, base_url: str) -> list[dict[str, Any]]:
                     token = []
                 else:
                     token.append(char)
-                if char == "\\\\" and not escaped:
+                if char == "\\" and not escaped:
                     escaped = True
                 else:
                     escaped = False
