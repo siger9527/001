@@ -12,7 +12,6 @@ import os
 import re
 import shutil
 import subprocess
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,7 +20,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "output"
-SHOTS = OUT / "screenshots"
 SOURCES_FILE = ROOT / "config" / "sources.txt"
 MAX_CANDIDATES = max(1, int(os.getenv("MAX_CANDIDATES", "300")))
 PROBE_TIMEOUT = max(4, int(os.getenv("PROBE_TIMEOUT_SECONDS", "12")))
@@ -52,14 +50,34 @@ def read_sources():
     return list(dict.fromkeys(rows))
 
 
+def extinf_display_name(line: str) -> str:
+    # EXTINF attributes can contain commas inside quoted values. The display name
+    # starts after the last comma that is outside a quoted string.
+    quoted = False
+    last_comma = -1
+    escaped = False
+    for index, char in enumerate(line):
+        if char == '"' and not escaped:
+            quoted = not quoted
+        elif char == ',' and not quoted:
+            last_comma = index
+        if char == "\\" and not escaped:
+            escaped = True
+        else:
+            escaped = False
+    if last_comma < 0:
+        return "Unknown channel"
+    name = line[last_comma + 1:].strip()
+    name = re.sub(r"\\s+", " ", name)[:200]
+    return name or "Unknown channel"
+
+
 def parse_m3u(text: str, source: str):
     entries, name = [], None
     for raw in text.splitlines():
         line = raw.strip()
         if line.startswith("#EXTINF"):
-            match = re.search(r',\s*(.*)$', line)
-            name = match.group(1).strip() if match else "Unknown channel"
-            name = re.sub(r"\s+", " ", name)[:200] or "Unknown channel"
+            name = extinf_display_name(line)
         elif line and not line.startswith("#") and line.lower().startswith(("http://", "https://")):
             entries.append({"name": name or "Unknown channel", "url": line, "source": source})
             name = None
@@ -90,11 +108,14 @@ def fetch_candidates(report):
             dedup[url] = row
         elif dedup[url]["name"] == "Unknown channel" and row["name"] != "Unknown channel":
             dedup[url]["name"] = row["name"]
-    rows = list(dedup.values())[:MAX_CANDIDATES]
+    rows = list(dedup.values())
+    report["candidate_limit_applied_to_probing"] = MAX_CANDIDATES
+    probe_rows = rows[:MAX_CANDIDATES]
     report["source_candidates_total"] = len(found)
     report["unique_candidates"] = len(dedup)
-    report["candidates_processed"] = len(rows)
-    return rows
+    report["candidates_processed"] = len(probe_rows)
+    report["candidates_published_all"] = len(rows)
+    return rows, probe_rows
 
 
 def probe_stream(row):
@@ -152,7 +173,7 @@ def main():
             "Local Ollama multi-frame review and trusted-reference checks are mandatory.",
         ],
     }
-    rows = fetch_candidates(report)
+    all_source_rows, rows = fetch_candidates(report)
     def process_candidate(row):
         row.update({"checked_at_utc": now_iso(), "technical_status": "pending",
                     "vision_status": "pending_local_review", "vision_label": "pending_local_review"})
@@ -184,13 +205,15 @@ def main():
             writer.writerow({key: json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else value
                              for key, value in row.items()})
 
-    write_m3u(OUT / "all_candidates.m3u", all_candidates)
+    write_m3u(OUT / "all_candidates.m3u", all_source_rows)
     write_m3u(OUT / "technical_pass.m3u", technical_pass)
     report.update({
         "finished_at_utc": now_iso(),
         "technical_pass_count": len(technical_pass),
         "pending_local_review_count": len(all_candidates),
         "output_files": ["all_candidates.m3u", "technical_pass.m3u", "candidates.csv", "report.json"],
+        "csv_scope": "first candidates_processed entries selected for technical probing",
+        "all_candidates_m3u_scope": "all unique playlist URLs collected from configured sources",
     })
     (OUT / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({k: report[k] for k in (
