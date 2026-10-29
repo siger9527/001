@@ -17,7 +17,6 @@ class PlaylistParsingTests(unittest.TestCase):
         self.assertEqual(rows[0]["name"], "Example HD")
         self.assertEqual(rows[0]["url"], "https://example.com/live.m3u8")
 
-
     def test_parses_commas_inside_quoted_extinf_attributes(self):
         rows = collector.parse_m3u(
             '#EXTM3U\n#EXTINF:-1 user-agent="Chrome/149.0, Safari/537.36" group-title="General",1+1 International HD\nhttps://example.com/live.m3u8\n',
@@ -33,9 +32,25 @@ class PlaylistParsingTests(unittest.TestCase):
         )
         self.assertEqual(rows, [])
 
+    def test_private_and_loopback_streams_are_excluded(self):
+        rows = collector.parse_m3u(
+            '#EXTM3U\n#EXTINF:-1,Public\nhttps://example.com/live.m3u8\n'
+            '#EXTINF:-1,Local\nhttp://127.0.0.1:8080/admin\n'
+            '#EXTINF:-1,Private\nhttp://192.168.1.5/live\n',
+            "fixture",
+        )
+        self.assertEqual([row["name"] for row in rows], ["Public"])
+
     def test_handles_missing_extinf(self):
         rows = collector.parse_m3u("https://example.com/a.m3u8\n", "fixture")
         self.assertEqual(rows[0]["name"], "Unknown channel")
+
+    def test_channel_name_whitespace_is_normalized(self):
+        rows = collector.parse_m3u(
+            '#EXTM3U\n#EXTINF:-1,Example    HD\nhttps://example.com/a.m3u8\n',
+            "fixture",
+        )
+        self.assertEqual(rows[0]["name"], "Example HD")
 
     def test_resolution_gate_is_strict(self):
         self.assertGreaterEqual(collector.MIN_WIDTH, 1280)
