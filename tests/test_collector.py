@@ -20,7 +20,7 @@ class PlaylistParsingTests(unittest.TestCase):
 
     def test_parses_commas_inside_quoted_extinf_attributes(self):
         rows = collector.parse_m3u(
-            '#EXTM3U\\n#EXTINF:-1 user-agent="Chrome/149.0, Safari/537.36" group-title="General",1+1 International HD\\nhttps://example.com/live.m3u8\\n',
+            '#EXTM3U\n#EXTINF:-1 user-agent="Chrome/149.0, Safari/537.36" group-title="General",1+1 International HD\nhttps://example.com/live.m3u8\n',
             "fixture",
         )
         self.assertEqual(len(rows), 1)
