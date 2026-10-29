@@ -70,3 +70,24 @@ The repository now includes a loopback-only local review dashboard. It is intent
 
 ### Local data and limitations
 The SQLite database, saved review frames, and decisions live under `local_data/`. Back up that directory if review history matters. Stream URLs can contain expiring tokens; do not share candidate exports or logs publicly without reviewing them. The local sniffer and cloud checks are technical aids, not a guarantee of legality, channel identity, or continuous playback.
+
+
+## Batch visual review (Windows local)
+
+The local reviewer includes `batch_review.py` so hundreds of imported candidates do not need to be clicked one by one. Start the local workbench once to initialize its database, then stop it or leave it running; run the batch command from the repository directory in a second Command Prompt:
+
+```powershell
+python batch_review.py
+```
+
+Useful options:
+
+- `python batch_review.py --status pending`: process pending-review candidates only (default).
+- `python batch_review.py --status all`: scan all review statuses.
+- `python batch_review.py --retry-failed`: retry only candidates with a recorded analysis error.
+- `python batch_review.py --limit 20`: limit a run to the first 20 eligible candidates.
+- `python batch_review.py --pause 1.5`: wait 1.5 seconds between candidates.
+
+The runner prints live progress and writes `batch-review-report.csv` as it proceeds. Each row records review status, AI label/confidence, observed text, summary, and error reason. It saves errors to SQLite and continues to the next candidate rather than stopping the whole batch. The report may contain stream URLs (including temporary tokens); inspect it before sharing.
+
+Batch analysis does not approve or reject anything. AI results are suggestions only; use the dashboard's human review decision before a channel enters `approved.m3u`. Analysis is sequential to avoid overloading an 8 GB VRAM local model. A channel can take up to the FFmpeg and Ollama timeouts, so a large batch may take a while.
