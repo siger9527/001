@@ -10,7 +10,8 @@ on:
       - ".github/workflows/daily.yml"
       - "tests/**"
   schedule:
-    - cron: "30 2 * * *"
+    - cron: "30 2 * * *"   # 10:30 Singapore time
+    - cron: "30 14 * * *"  # 22:30 Singapore time
 
 permissions:
   contents: write
