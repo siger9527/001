@@ -2,6 +2,13 @@ name: Daily IPTV Cloud Pre-screen
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "collector.py"
+      - "config/sources.txt"
+      - ".github/workflows/daily.yml"
+      - "tests/**"
   schedule:
     - cron: "30 2 * * *"
 
