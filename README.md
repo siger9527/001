@@ -13,15 +13,22 @@ Each successful run publishes stable subscription URLs from the `daily-output` b
 Schedule: daily at **10:30 and 22:30 Singapore time** (02:30 and 14:30 UTC).
 
 Each scheduled/manual run also publishes an artifact named `iptv-candidates` containing:
-- `all_candidates.m3u`: deduplicated candidate URLs (not approved)
+- `all_candidates.m3u`: deduplicated candidate URLs that pass URL-policy filtering (not approved)
 - `technical_pass.m3u`: reachable streams with measured resolution >= 1280x720
-- `candidates.csv` and `report.json`: per-stream technical status and local-review flags
+- `candidates.csv` and `report.json`: per-stream technical status, URL-policy counts, and local-review flags
 
 ## Configure
 1. Edit `config/sources.txt` to add/remove playlist URLs.
 2. Run Actions → Daily IPTV Cloud Pre-screen → Run workflow to test immediately. Scheduled runs are daily at 02:30 and 14:30 UTC (10:30 and 22:30 Singapore time).
 
-No visual-model API key is required. The cloud stage only collects playlists, deduplicates URLs, probes video dimensions, and publishes candidates. The Windows local application performs visual review.
+No visual-model API key is required. The cloud stage collects playlists, deduplicates URLs, applies conservative URL filtering, probes video dimensions, and publishes candidates. The Windows local application performs visual review.
+
+## URL safety policy
+- Only HTTP(S) URLs are eligible.
+- URLs containing embedded credentials are rejected.
+- Loopback, private, link-local, reserved/non-global IP literals and local-only hostnames (such as `.local` and `.internal`) are rejected before publishing or probing.
+- Rejected candidate counts are included in `report.json` and per-source status rows.
+- This is defense-in-depth, not a complete SSRF boundary: redirects and DNS rebinding are not fully prevented. Do not run untrusted streams in a privileged network environment.
 
 ## Important
 - Public playlist inclusion does not establish permission, legality, channel identity, or reliability.
