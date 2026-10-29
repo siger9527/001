@@ -47,3 +47,26 @@ The cloud pre-screen performs bounded HTTP inspection for each selected candidat
 - records sniff type, final URL, content type, manifest count, variant probe result and reason in `candidates.csv`.
 
 This is a bounded sniffer, not a general-purpose website crawler. It does not execute scripts, bypass access controls, or infer channel identity. HTML discovery is heuristic; providers requiring cookies, tokens, or special headers may remain undetected. DNS rebinding is not fully prevented.
+
+
+## Local Windows review workbench
+
+The repository now includes a loopback-only local review dashboard. It is intentionally separate from the cloud technical pre-screen: a cloud pass never equals channel approval.
+
+### Start
+1. Install Python 3.10+ and FFmpeg; make sure `python` and `ffmpeg` work in Command Prompt.
+2. Ensure Ollama is running locally and the configured vision-capable model is installed. The default is `qwen3.5:9b-q4_k_m`; override with `OLLAMA_MODEL` if needed.
+3. On Windows, double-click `启动本地IPTV审核工作台.bat`.
+4. Open `http://127.0.0.1:8765/`.
+5. Paste the content of `all_candidates.m3u` or another playlist into the import box. The database is stored under `local_data/`.
+
+### Review and playlist rules
+- `all.m3u` contains pending and approved candidates, but excludes entries explicitly rejected/blacklisted.
+- `approved.m3u` contains only entries explicitly approved by a human reviewer.
+- Duplicate imports do not reset prior review decisions.
+- **Ollama is advisory only.** The local app captures up to three frames with FFmpeg and requests a JSON description/match recommendation. It never automatically approves a stream.
+- Failed frame capture or model requests are reported; they are not silently treated as approval or rejection.
+- The dashboard binds only to `127.0.0.1`. Do not change it to a public interface without adding authentication, CSRF protections, and network isolation.
+
+### Local data and limitations
+The SQLite database, saved review frames, and decisions live under `local_data/`. Back up that directory if review history matters. Stream URLs can contain expiring tokens; do not share candidate exports or logs publicly without reviewing them. The local sniffer and cloud checks are technical aids, not a guarantee of legality, channel identity, or continuous playback.
