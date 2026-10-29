@@ -1,0 +1,22 @@
+name: Local batch review tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, feature/batch-review-workflow]
+  workflow_dispatch:
+
+jobs:
+  batch-review-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile application and batch runner
+        run: python -m py_compile local_iptv_server.py batch_review.py url_policy.py
+      - name: Run batch workflow tests
+        run: python -m unittest discover -s tests -p "test_batch_review.py" -v
