@@ -12,11 +12,13 @@ import os
 import re
 import shutil
 import subprocess
-import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+from url_policy import public_http_url
+from resource_sniffer import sniff_resource
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "output"
@@ -25,6 +27,7 @@ MAX_CANDIDATES = max(1, int(os.getenv("MAX_CANDIDATES", "300")))
 PROBE_TIMEOUT = max(4, int(os.getenv("PROBE_TIMEOUT_SECONDS", "12")))
 USER_AGENT = "IPTVCloudPrescreen/1.0 (GitHub Actions; conservative public playlist audit)"
 MIN_WIDTH, MIN_HEIGHT = 1280, 720
+URL_POLICY_REJECTIONS = 0
 
 
 def now_iso():
@@ -43,10 +46,8 @@ def read_sources():
     rows = []
     for line in SOURCES_FILE.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
-        if line and not line.startswith("#"):
-            parsed = urllib.parse.urlparse(line)
-            if parsed.scheme in ("http", "https") and parsed.netloc:
-                rows.append(line)
+        if line and not line.startswith("#") and public_http_url(line):
+            rows.append(line)
     return list(dict.fromkeys(rows))
 
 
@@ -68,18 +69,22 @@ def extinf_display_name(line: str) -> str:
     if last_comma < 0:
         return "Unknown channel"
     name = line[last_comma + 1:].strip()
-    name = re.sub(r"\\s+", " ", name)[:200]
+    name = re.sub(r"\s+", " ", name)[:200]
     return name or "Unknown channel"
 
 
 def parse_m3u(text: str, source: str):
+    global URL_POLICY_REJECTIONS
     entries, name = [], None
     for raw in text.splitlines():
         line = raw.strip()
         if line.startswith("#EXTINF"):
             name = extinf_display_name(line)
-        elif line and not line.startswith("#") and line.lower().startswith(("http://", "https://")):
-            entries.append({"name": name or "Unknown channel", "url": line, "source": source})
+        elif line and not line.startswith("#"):
+            if public_http_url(line):
+                entries.append({"name": name or "Unknown channel", "url": line, "source": source})
+            elif line.lower().startswith(("http://", "https://")):
+                URL_POLICY_REJECTIONS += 1
             name = None
     return entries
 
@@ -93,8 +98,10 @@ def fetch_candidates(report):
             if len(raw) > 20 * 1024 * 1024:
                 raise ValueError("playlist exceeds 20 MiB safety limit")
             text = raw.decode("utf-8-sig", errors="replace")
+            before = URL_POLICY_REJECTIONS
             rows = parse_m3u(text, source)
-            item.update(status="ok", candidates=len(rows))
+            rejected = URL_POLICY_REJECTIONS - before
+            item.update(status="ok", candidates=len(rows), rejected_by_url_policy=rejected)
             found.extend(rows)
         except Exception as exc:
             item.update(status="error", error=f"{type(exc).__name__}: {str(exc)[:300]}")
@@ -123,6 +130,7 @@ def fetch_candidates(report):
     report["unique_candidates"] = len(dedup)
     report["candidates_processed"] = len(probe_rows)
     report["candidates_published_all"] = len(rows)
+    report["url_policy_rejections"] = URL_POLICY_REJECTIONS
     return rows, probe_rows
 
 
@@ -179,13 +187,55 @@ def main():
         "notes": [
             "This report is a candidate feed, not a final approved channel list.",
             "Local Ollama multi-frame review and trusted-reference checks are mandatory.",
+            "Private, loopback, link-local, reserved IP literals and local-only hostnames are excluded by URL policy.",
+            "URL policy is defense-in-depth; it does not guarantee safety against public host redirects or DNS rebinding.",
         ],
     }
+    global URL_POLICY_REJECTIONS
+    URL_POLICY_REJECTIONS = 0
     all_source_rows, rows = fetch_candidates(report)
+
     def process_candidate(row):
         row.update({"checked_at_utc": now_iso(), "technical_status": "pending",
                     "vision_status": "pending_local_review", "vision_label": "pending_local_review"})
-        row.update(probe_stream(row))
+        sniff = sniff_resource(row["url"], timeout=min(PROBE_TIMEOUT, 8))
+        row["sniff_status"] = sniff["sniff_status"]
+        row["sniff_resource_type"] = sniff["resource_type"]
+        row["sniff_content_type"] = sniff["content_type"]
+        row["sniff_final_url"] = sniff["final_url"]
+        row["sniff_reason"] = sniff["sniff_reason"]
+        row["embedded_manifest_count"] = len(sniff["embedded_manifests"])
+        variants = sniff["hls_variants"]
+        # Prioritize likely HD variants so a large master playlist does not waste
+        # the bounded probe budget on low-resolution entries listed first.
+        ranked_variants = sorted(
+            variants,
+            key=lambda item: (item.get("height", 0), item.get("width", 0), item.get("bandwidth", 0)),
+            reverse=True,
+        )
+        targets = ranked_variants[:8]
+        if not targets and sniff["resource_type"] == "html_page":
+            targets = [{"url": item, "width": 0, "height": 0, "bandwidth": 0, "codecs": ""}
+                       for item in sniff["embedded_manifests"][:8]]
+        if targets:
+            probes = []
+            for target in targets:
+                result = probe_stream({"url": target["url"]})
+                result.update({"variant_url": target["url"], "variant_width_hint": target["width"],
+                               "variant_height_hint": target["height"], "variant_bandwidth": target["bandwidth"]})
+                probes.append(result)
+            passing = [item for item in probes if item.get("technical_status") == "pass"]
+            if passing:
+                selected = max(passing, key=lambda item: (item.get("height", 0), item.get("width", 0),
+                                                          item.get("variant_bandwidth", 0)))
+                row.update(selected)
+                row["technical_reason"] = "a discovered HLS variant passed measured resolution checks"
+            else:
+                row.update(probes[0])
+                row["variant_probe_count"] = len(probes)
+                row["variant_probe_failures"] = [item.get("technical_reason", "") for item in probes]
+        else:
+            row.update(probe_stream(row))
         if row["technical_status"] == "pass":
             row.update({"vision_status": "not_run_cloud_vision",
                         "vision_reason": "cloud stage is technical-only; local visual review is required"})
@@ -195,7 +245,6 @@ def main():
 
     all_candidates = []
     technical_pass = []
-    # Bounded concurrency avoids serial multi-hour probing without exhausting the runner.
     workers = max(1, min(8, int(os.getenv("PROBE_WORKERS", "8"))))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for index, row in enumerate(pool.map(process_candidate, rows), start=1):
@@ -215,7 +264,6 @@ def main():
 
     write_m3u(OUT / "all_candidates.m3u", all_source_rows)
     write_m3u(OUT / "technical_pass.m3u", technical_pass)
-    # Short, memorable aliases for subscription clients.
     write_m3u(OUT / "all.m3u", all_source_rows)
     write_m3u(OUT / "hd.m3u", technical_pass)
     report.update({
@@ -224,12 +272,12 @@ def main():
         "pending_local_review_count": len(all_candidates),
         "output_files": ["all.m3u", "hd.m3u", "all_candidates.m3u", "technical_pass.m3u", "candidates.csv", "report.json"],
         "csv_scope": "deterministic evenly distributed sample selected for technical probing",
-        "all_candidates_m3u_scope": "all unique playlist URLs collected from configured sources",
+        "all_candidates_m3u_scope": "all unique playlist URLs collected from configured sources after URL policy filtering",
     })
     (OUT / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({k: report[k] for k in (
         "generated_at_utc", "source_candidates_total", "unique_candidates",
-        "candidates_processed", "technical_pass_count", "pending_local_review_count",
+        "candidates_processed", "technical_pass_count", "pending_local_review_count", "url_policy_rejections",
     )}, ensure_ascii=False))
 
 
