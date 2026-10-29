@@ -33,9 +33,18 @@ def main() -> int:
     if args.limit < 0 or args.pause < 0:
         parser.error("--limit and --pause must not be negative")
 
-    status = "" if args.status == "all" else args.status
-    rows = app.list_candidates(status)
-    if not args.retry_failed:
+    conn = app.connect()
+    try:
+        if args.status == "all":
+            rows = [dict(r) for r in conn.execute("SELECT * FROM candidates ORDER BY id")]
+        else:
+            rows = [dict(r) for r in conn.execute(
+                "SELECT * FROM candidates WHERE status=? ORDER BY id", (args.status,))]
+    finally:
+        conn.close()
+    if args.retry_failed:
+        rows = [r for r in rows if r.get("analysis_error")]
+    else:
         rows = [r for r in rows if not r.get("ai_label") or r.get("analysis_error")]
     if args.limit:
         rows = rows[:args.limit]
