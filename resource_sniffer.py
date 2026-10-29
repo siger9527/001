@@ -8,7 +8,6 @@ from __future__ import annotations
 import re
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, asdict
 from typing import Any
 
 from url_policy import public_http_url
@@ -62,8 +61,27 @@ def parse_hls_variants(text: str, base_url: str) -> list[dict[str, Any]]:
         if line.startswith("#EXT-X-STREAM-INF:"):
             attrs = line.split(":", 1)[1]
             pending = {}
-            for key, value in re.findall(r'([A-Z0-9-]+)=("[^"]*"|[^,]*)', attrs):
-                pending[key] = value.strip('"')
+            # HLS attribute lists use commas as separators except inside quoted values.
+            parts, token, quoted, escaped = [], [], False, False
+            for char in attrs:
+                if char == '"' and not escaped:
+                    quoted = not quoted
+                if char == "," and not quoted:
+                    parts.append("".join(token).strip())
+                    token = []
+                else:
+                    token.append(char)
+                if char == "\\\\" and not escaped:
+                    escaped = True
+                else:
+                    escaped = False
+            if token:
+                parts.append("".join(token).strip())
+            for part in parts:
+                if "=" not in part:
+                    continue
+                key, value = part.split("=", 1)
+                pending[key.strip()] = value.strip().strip('"')
         elif line and not line.startswith("#") and pending is not None:
             target = urllib.parse.urljoin(base_url, line)
             if public_http_url(target):
