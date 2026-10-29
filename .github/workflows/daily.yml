@@ -36,7 +36,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-      - name: Collect, probe and vision-triage
+      - name: Collect and technically pre-screen
         env:
           MAX_CANDIDATES: "300"
           PROBE_TIMEOUT_SECONDS: "12"
