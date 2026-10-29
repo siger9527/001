@@ -5,7 +5,6 @@ No stream is considered finally approved here. Local visual review remains manda
 """
 from __future__ import annotations
 
-import base64
 import csv
 import json
 import os
@@ -25,10 +24,6 @@ SHOTS = OUT / "screenshots"
 SOURCES_FILE = ROOT / "config" / "sources.txt"
 MAX_CANDIDATES = max(1, int(os.getenv("MAX_CANDIDATES", "300")))
 PROBE_TIMEOUT = max(4, int(os.getenv("PROBE_TIMEOUT_SECONDS", "12")))
-VISION_MAX_ITEMS = max(0, int(os.getenv("VISION_MAX_ITEMS", "40")))
-VISION_KEY = os.getenv("VISION_API_KEY", "").strip()
-VISION_BASE = (os.getenv("VISION_BASE_URL") or "https://api.openai.com/v1").strip().rstrip("/")
-VISION_MODEL = (os.getenv("VISION_MODEL") or "gpt-4o-mini").strip()
 USER_AGENT = "IPTVCloudPrescreen/1.0 (GitHub Actions; conservative public playlist audit)"
 MIN_WIDTH, MIN_HEIGHT = 1280, 720
 
@@ -134,88 +129,6 @@ def probe_stream(row):
         return {"technical_status": "error", "technical_reason": f"{type(exc).__name__}: {str(exc)[:200]}"}
 
 
-def capture_frame(url: str, dest: Path):
-    ffmpeg = shutil.which("ffmpeg")
-    if not ffmpeg:
-        return False, "ffmpeg not installed"
-    cmd = [
-        ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-        "-user_agent", USER_AGENT, "-rw_timeout", str(PROBE_TIMEOUT * 1_000_000),
-        "-i", url, "-frames:v", "1", "-vf", "scale=640:-2",
-        "-q:v", "5", str(dest),
-    ]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=PROBE_TIMEOUT + 8)
-        if result.returncode == 0 and dest.exists() and dest.stat().st_size > 0:
-            return True, ""
-        return False, (result.stderr or "frame extraction failed")[-250:]
-    except subprocess.TimeoutExpired:
-        return False, "frame extraction timed out"
-    except Exception as exc:
-        return False, f"{type(exc).__name__}: {str(exc)[:200]}"
-
-
-def vision_triage(row, image_path: Path):
-    if not VISION_KEY:
-        return {"vision_status": "not_configured", "vision_label": "pending_local_review",
-                "vision_reason": "cloud vision API key is not configured"}
-    try:
-        encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
-        payload = {
-            "model": VISION_MODEL,
-            "temperature": 0,
-            "max_tokens": 250,
-            "messages": [{
-                "role": "system",
-                "content": (
-                    "You are a conservative IPTV screenshot triage assistant. This is only one frame. "
-                    "Do not claim channel identity from a logo alone. Do not blacklist. "
-                    "Return JSON only with fields risk (possible_shopping, possible_impersonation, "
-                    "ordinary_broadcast, unclear), confidence (low/medium/high), visible_evidence "
-                    "(short factual description), needs_local_review (always true). If evidence is "
-                    "insufficient choose unclear."
-                )
-            }, {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": f"Channel metadata label: {row['name']}. Assess only visible evidence; metadata may be wrong."},
-                    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + encoded, "detail": "low"}}
-                ]
-            }]
-        }
-        req = urllib.request.Request(
-            VISION_BASE + "/chat/completions",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Authorization": "Bearer " + VISION_KEY,
-                     "Content-Type": "application/json", "User-Agent": USER_AGENT},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=60) as response:
-            result = json.loads(response.read().decode("utf-8"))
-        text = result["choices"][0]["message"]["content"]
-        match = re.search(r"\{.*\}", text, flags=re.S)
-        if not match:
-            raise ValueError("model did not return a JSON object")
-        obj = json.loads(match.group(0))
-        allowed = {"possible_shopping", "possible_impersonation", "ordinary_broadcast", "unclear"}
-        risk = obj.get("risk") if obj.get("risk") in allowed else "unclear"
-        return {
-            "vision_status": "completed",
-            "vision_label": "pending_local_review",
-            "vision_risk_hint": risk,
-            "vision_confidence": str(obj.get("confidence", "low"))[:20],
-            "vision_evidence": str(obj.get("visible_evidence", ""))[:500],
-            "vision_needs_local_review": True,
-        }
-    except urllib.error.HTTPError as exc:
-        # Do not include request headers or secret values in logs.
-        return {"vision_status": "error", "vision_label": "pending_local_review",
-                "vision_reason": f"HTTP {exc.code}; check provider endpoint/model/quota"}
-    except Exception as exc:
-        return {"vision_status": "error", "vision_label": "pending_local_review",
-                "vision_reason": f"{type(exc).__name__}: {str(exc)[:250]}"}
-
-
 def write_m3u(path: Path, rows):
     with path.open("w", encoding="utf-8", newline="\n") as handle:
         handle.write("#EXTM3U\n")
@@ -229,41 +142,26 @@ def main():
     SHOTS.mkdir(parents=True, exist_ok=True)
     report = {
         "generated_at_utc": now_iso(),
-        "pipeline": "cloud_technical_prescreen_plus_optional_vision_triage",
+        "pipeline": "cloud_technical_prescreen_only",
         "final_approval": False,
         "local_visual_review_required": True,
         "sources": [],
         "notes": [
             "This report is a candidate feed, not a final approved channel list.",
-            "Cloud vision analyzes at most one frame per selected stream; it cannot prove identity.",
-            "Vision uncertainty, missing credentials, and technical failures are not blacklist evidence.",
             "Local Ollama multi-frame review and trusted-reference checks are mandatory.",
         ],
     }
     rows = fetch_candidates(report)
     all_candidates = []
     technical_pass = []
-    vision_done = 0
     for index, row in enumerate(rows, start=1):
         row.update({"checked_at_utc": now_iso(), "technical_status": "pending",
                     "vision_status": "pending", "vision_label": "pending_local_review"})
         row.update(probe_stream(row))
         if row["technical_status"] == "pass":
             technical_pass.append(row)
-            if vision_done < VISION_MAX_ITEMS:
-                safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", row["name"])[:45] or "channel"
-                shot = SHOTS / f"{index:05d}_{safe_name}.jpg"
-                ok, reason = capture_frame(row["url"], shot)
-                row["screenshot_status"] = "captured" if ok else "failed"
-                if ok:
-                    vision_done += 1
-                    row.update(vision_triage(row, shot))
-                else:
-                    row.update({"vision_status": "frame_failed", "vision_label": "pending_local_review",
-                                "vision_reason": reason})
-            else:
-                row.update({"vision_status": "limit_reached", "vision_label": "pending_local_review",
-                            "vision_reason": "daily vision item cap reached"})
+            row.update({"vision_status": "not_run_cloud_vision", "vision_label": "pending_local_review",
+                        "vision_reason": "cloud stage is technical-only; local visual review is required"})
         else:
             row.update({"vision_status": "not_run_technical_gate", "vision_label": "pending_local_review"})
         all_candidates.append(row)
@@ -283,16 +181,12 @@ def main():
     report.update({
         "finished_at_utc": now_iso(),
         "technical_pass_count": len(technical_pass),
-        "vision_completed_count": sum(r.get("vision_status") == "completed" for r in all_candidates),
-        "vision_error_count": sum(r.get("vision_status") == "error" for r in all_candidates),
         "pending_local_review_count": len(all_candidates),
         "output_files": ["all_candidates.m3u", "technical_pass.m3u", "candidates.csv", "report.json"],
     })
     (OUT / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({k: report[k] for k in (
         "generated_at_utc", "source_candidates_total", "unique_candidates",
-        "candidates_processed", "technical_pass_count", "vision_completed_count",
-        "vision_error_count", "pending_local_review_count"
     )}, ensure_ascii=False))
 
 
