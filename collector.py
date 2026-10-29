@@ -68,7 +68,7 @@ def extinf_display_name(line: str) -> str:
     if last_comma < 0:
         return "Unknown channel"
     name = line[last_comma + 1:].strip()
-    name = re.sub(r"\\s+", " ", name)[:200]
+    name = re.sub(r"\s+", " ", name)[:200]
     return name or "Unknown channel"
 
 
