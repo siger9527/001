@@ -6,7 +6,7 @@ on:
     - cron: "30 2 * * *"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: iptv-cloud-prescreen
@@ -43,3 +43,11 @@ jobs:
           path: output/
           if-no-files-found: error
           retention-days: 14
+      - name: Publish latest files to stable branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: daily-output
+          publish_dir: output/
+          force_orphan: true
+          commit_message: "Update daily IPTV candidate feed"
