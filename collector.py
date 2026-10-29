@@ -215,11 +215,14 @@ def main():
 
     write_m3u(OUT / "all_candidates.m3u", all_source_rows)
     write_m3u(OUT / "technical_pass.m3u", technical_pass)
+    # Short, memorable aliases for subscription clients.
+    write_m3u(OUT / "all.m3u", all_source_rows)
+    write_m3u(OUT / "hd.m3u", technical_pass)
     report.update({
         "finished_at_utc": now_iso(),
         "technical_pass_count": len(technical_pass),
         "pending_local_review_count": len(all_candidates),
-        "output_files": ["all_candidates.m3u", "technical_pass.m3u", "candidates.csv", "report.json"],
+        "output_files": ["all.m3u", "hd.m3u", "all_candidates.m3u", "technical_pass.m3u", "candidates.csv", "report.json"],
         "csv_scope": "deterministic evenly distributed sample selected for technical probing",
         "all_candidates_m3u_scope": "all unique playlist URLs collected from configured sources",
     })
