@@ -6,6 +6,7 @@ No stream is considered finally approved here. Local visual review remains manda
 from __future__ import annotations
 
 import csv
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import re
@@ -139,9 +140,9 @@ def write_m3u(path: Path, rows):
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    SHOTS.mkdir(parents=True, exist_ok=True)
     report = {
         "generated_at_utc": now_iso(),
+        "probe_workers": max(1, min(8, int(os.getenv("PROBE_WORKERS", "8")))),
         "pipeline": "cloud_technical_prescreen_only",
         "final_approval": False,
         "local_visual_review_required": True,
@@ -152,21 +153,28 @@ def main():
         ],
     }
     rows = fetch_candidates(report)
-    all_candidates = []
-    technical_pass = []
-    for index, row in enumerate(rows, start=1):
+    def process_candidate(row):
         row.update({"checked_at_utc": now_iso(), "technical_status": "pending",
-                    "vision_status": "pending", "vision_label": "pending_local_review"})
+                    "vision_status": "pending_local_review", "vision_label": "pending_local_review"})
         row.update(probe_stream(row))
         if row["technical_status"] == "pass":
-            technical_pass.append(row)
-            row.update({"vision_status": "not_run_cloud_vision", "vision_label": "pending_local_review",
+            row.update({"vision_status": "not_run_cloud_vision",
                         "vision_reason": "cloud stage is technical-only; local visual review is required"})
         else:
-            row.update({"vision_status": "not_run_technical_gate", "vision_label": "pending_local_review"})
-        all_candidates.append(row)
-        if index % 25 == 0:
-            print(f"Processed {index}/{len(rows)} candidates; technical pass={len(technical_pass)}")
+            row.update({"vision_status": "not_run_technical_gate"})
+        return row
+
+    all_candidates = []
+    technical_pass = []
+    # Bounded concurrency avoids serial multi-hour probing without exhausting the runner.
+    workers = max(1, min(8, int(os.getenv("PROBE_WORKERS", "8"))))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for index, row in enumerate(pool.map(process_candidate, rows), start=1):
+            all_candidates.append(row)
+            if row["technical_status"] == "pass":
+                technical_pass.append(row)
+            if index % 25 == 0 or index == len(rows):
+                print(f"Processed {index}/{len(rows)} candidates; technical pass={len(technical_pass)}", flush=True)
 
     fields = sorted({key for row in all_candidates for key in row})
     with (OUT / "candidates.csv").open("w", encoding="utf-8-sig", newline="") as handle:
@@ -187,6 +195,7 @@ def main():
     (OUT / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({k: report[k] for k in (
         "generated_at_utc", "source_candidates_total", "unique_candidates",
+        "candidates_processed", "technical_pass_count", "pending_local_review_count",
     )}, ensure_ascii=False))
 
 
