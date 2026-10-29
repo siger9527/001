@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from url_policy import public_http_url
+from resource_sniffer import sniff_resource
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "output"
@@ -197,7 +198,37 @@ def main():
     def process_candidate(row):
         row.update({"checked_at_utc": now_iso(), "technical_status": "pending",
                     "vision_status": "pending_local_review", "vision_label": "pending_local_review"})
-        row.update(probe_stream(row))
+        sniff = sniff_resource(row["url"], timeout=min(PROBE_TIMEOUT, 8))
+        row["sniff_status"] = sniff["sniff_status"]
+        row["sniff_resource_type"] = sniff["resource_type"]
+        row["sniff_content_type"] = sniff["content_type"]
+        row["sniff_final_url"] = sniff["final_url"]
+        row["sniff_reason"] = sniff["sniff_reason"]
+        row["embedded_manifest_count"] = len(sniff["embedded_manifests"])
+        variants = sniff["hls_variants"]
+        targets = variants[:8] if variants else []
+        if not targets and sniff["resource_type"] == "html_page":
+            targets = [{"url": item, "width": 0, "height": 0, "bandwidth": 0, "codecs": ""}
+                       for item in sniff["embedded_manifests"][:8]]
+        if targets:
+            probes = []
+            for target in targets:
+                result = probe_stream({"url": target["url"]})
+                result.update({"variant_url": target["url"], "variant_width_hint": target["width"],
+                               "variant_height_hint": target["height"], "variant_bandwidth": target["bandwidth"]})
+                probes.append(result)
+            passing = [item for item in probes if item.get("technical_status") == "pass"]
+            if passing:
+                selected = max(passing, key=lambda item: (item.get("height", 0), item.get("width", 0),
+                                                          item.get("variant_bandwidth", 0)))
+                row.update(selected)
+                row["technical_reason"] = "a discovered HLS variant passed measured resolution checks"
+            else:
+                row.update(probes[0])
+                row["variant_probe_count"] = len(probes)
+                row["variant_probe_failures"] = [item.get("technical_reason", "") for item in probes]
+        else:
+            row.update(probe_stream(row))
         if row["technical_status"] == "pass":
             row.update({"vision_status": "not_run_cloud_vision",
                         "vision_reason": "cloud stage is technical-only; local visual review is required"})
