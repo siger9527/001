@@ -1,0 +1,45 @@
+name: Daily IPTV Cloud Pre-screen
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 2 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iptv-cloud-prescreen
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Collect, probe and vision-triage
+        env:
+          VISION_API_KEY: ${{ secrets.VISION_API_KEY }}
+          VISION_BASE_URL: ${{ vars.VISION_BASE_URL }}
+          VISION_MODEL: ${{ vars.VISION_MODEL }}
+          MAX_CANDIDATES: "300"
+          PROBE_TIMEOUT_SECONDS: "12"
+          VISION_MAX_ITEMS: "40"
+        run: python collector.py
+      - name: Publish run report as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: iptv-candidates
+          path: output/
+          if-no-files-found: error
+          retention-days: 14
