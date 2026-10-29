@@ -40,10 +40,11 @@ class ResourceSnifferTests(unittest.TestCase):
         self.assertEqual(len(result["hls_variants"]), 1)
 
     def test_sniff_resource_rejects_unsafe_input_without_network(self):
-        with patch.object(sniffer, "_fetch", side_effect=AssertionError("network must not be touched")):
+        with patch.object(sniffer, "_opener") as opener_factory:
             result = sniffer.sniff_resource("http://127.0.0.1/private.m3u8")
         self.assertEqual(result["sniff_status"], "error")
         self.assertIn("URL rejected", result["sniff_reason"])
+        opener_factory.assert_not_called()
 
     def test_rejects_private_hls_variant(self):
         rows = sniffer.parse_hls_variants(
