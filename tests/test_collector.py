@@ -17,6 +17,15 @@ class PlaylistParsingTests(unittest.TestCase):
         self.assertEqual(rows[0]["name"], "Example HD")
         self.assertEqual(rows[0]["url"], "https://example.com/live.m3u8")
 
+
+    def test_parses_commas_inside_quoted_extinf_attributes(self):
+        rows = collector.parse_m3u(
+            '#EXTM3U\\n#EXTINF:-1 user-agent="Chrome/149.0, Safari/537.36" group-title="General",1+1 International HD\\nhttps://example.com/live.m3u8\\n',
+            "fixture",
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["name"], "1+1 International HD")
+
     def test_ignores_comments_and_non_http_urls(self):
         rows = collector.parse_m3u(
             '#EXTM3U\n#EXTINF:-1,Example\nrtmp://example.com/live\n# comment\n',
