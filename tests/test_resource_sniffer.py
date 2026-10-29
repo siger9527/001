@@ -23,14 +23,14 @@ class ResourceSnifferTests(unittest.TestCase):
 
     def test_parses_commas_inside_quoted_codec_attribute(self):
         rows = sniffer.parse_hls_variants(
-            '#EXTM3U\\n#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720,CODECS="avc1.4d401f,mp4a.40.2"\\n720.m3u8\\n',
+            '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720,CODECS="avc1.4d401f,mp4a.40.2"\n720.m3u8\n',
             "https://example.org/master.m3u8",
         )
         self.assertEqual(rows[0]["codecs"], "avc1.4d401f,mp4a.40.2")
         self.assertEqual(rows[0]["bandwidth"], 2500000)
 
     def test_sniff_resource_classifies_hls_master_without_network(self):
-        body = b'#EXTM3U\\n#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1280x720\\n720.m3u8\\n'
+        body = b'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1280x720\n720.m3u8\n'
         with patch.object(sniffer, "_fetch", return_value=(
             "https://example.org/master.m3u8", "application/vnd.apple.mpegurl", body, 200
         )):
