@@ -206,7 +206,14 @@ def main():
         row["sniff_reason"] = sniff["sniff_reason"]
         row["embedded_manifest_count"] = len(sniff["embedded_manifests"])
         variants = sniff["hls_variants"]
-        targets = variants[:8] if variants else []
+        # Prioritize likely HD variants so a large master playlist does not waste
+        # the bounded probe budget on low-resolution entries listed first.
+        ranked_variants = sorted(
+            variants,
+            key=lambda item: (item.get("height", 0), item.get("width", 0), item.get("bandwidth", 0)),
+            reverse=True,
+        )
+        targets = ranked_variants[:8]
         if not targets and sniff["resource_type"] == "html_page":
             targets = [{"url": item, "width": 0, "height": 0, "bandwidth": 0, "codecs": ""}
                        for item in sniff["embedded_manifests"][:8]]
