@@ -81,7 +81,7 @@ class LocalReviewServerTests(unittest.TestCase):
         candidate = app.list_candidates()[0]
         app.review(candidate["id"], "approved")
         # The analysis implementation has no status write; assert the review helper is separate.
-        self.assertEqual(app.get_candidate(candidate["id"])["status"], "approved")
+        self.assertEqual(next(r for r in app.list_candidates() if r["id"] == candidate["id"])["status"], "approved")
 
     def test_rejects_oversized_playlist(self):
         with self.assertRaises(ValueError):
