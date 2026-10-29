@@ -38,12 +38,8 @@ jobs:
           sudo apt-get install -y ffmpeg
       - name: Collect, probe and vision-triage
         env:
-          VISION_API_KEY: ${{ secrets.VISION_API_KEY }}
-          VISION_BASE_URL: ${{ vars.VISION_BASE_URL }}
-          VISION_MODEL: ${{ vars.VISION_MODEL }}
           MAX_CANDIDATES: "300"
           PROBE_TIMEOUT_SECONDS: "12"
-          VISION_MAX_ITEMS: "40"
         run: python collector.py
       - name: Publish run report as artifact
         uses: actions/upload-artifact@v4
