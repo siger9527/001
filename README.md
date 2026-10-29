@@ -36,3 +36,14 @@ No visual-model API key is required. The cloud stage collects playlists, dedupli
 - The local Windows application must independently perform multi-frame visual review, channel reference checks, blacklisting with evidence, aggregation, and final M3U generation.
 - GitHub-hosted runners have limited time/network access. A stream may be temporarily unreachable. Failures are reported, not treated as proof of bad content.
 - The collector intentionally avoids exposing secrets in logs or reports.
+
+
+## Resource sniffing
+The cloud pre-screen performs bounded HTTP inspection for each selected candidate:
+- identifies HLS master/media playlists, DASH MPD manifests, direct audio/video responses, and HTML pages;
+- parses HLS master variants and probes up to eight discovered variants, selecting a passing variant based on measured dimensions;
+- extracts up to 50 explicit embedded HLS/DASH manifest links from HTML without running JavaScript;
+- validates discovered URLs and redirect destinations against the public URL policy;
+- records sniff type, final URL, content type, manifest count, variant probe result and reason in `candidates.csv`.
+
+This is a bounded sniffer, not a general-purpose website crawler. It does not execute scripts, bypass access controls, or infer channel identity. HTML discovery is heuristic; providers requiring cookies, tokens, or special headers may remain undetected. DNS rebinding is not fully prevented.
