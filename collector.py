@@ -167,6 +167,29 @@ def probe_stream(row):
         return {"technical_status": "error", "technical_reason": f"{type(exc).__name__}: {str(exc)[:200]}"}
 
 
+def apply_selected_probe(row, probes, resource_type):
+    """Apply the best passing probe and publish its actual media URL, not its wrapper page."""
+    passing = [item for item in probes if item.get("technical_status") == "pass"]
+    if not passing:
+        if probes:
+            row.update(probes[0])
+            row["variant_probe_count"] = len(probes)
+            row["variant_probe_failures"] = [item.get("technical_reason", "") for item in probes]
+        return row
+    selected = max(passing, key=lambda item: (
+        item.get("height", 0), item.get("width", 0), item.get("variant_bandwidth", 0)
+    ))
+    row.update(selected)
+    target_url = selected.get("variant_url")
+    if target_url:
+        row["url"] = target_url
+    if resource_type == "html_page":
+        row["technical_reason"] = "an embedded media manifest passed measured video checks"
+    else:
+        row["technical_reason"] = "a discovered HLS variant passed measured resolution checks"
+    return row
+
+
 def write_m3u(path: Path, rows):
     with path.open("w", encoding="utf-8", newline="\n") as handle:
         handle.write("#EXTM3U\n")
@@ -198,7 +221,9 @@ def main():
     def process_candidate(row):
         row.update({"checked_at_utc": now_iso(), "technical_status": "pending",
                     "vision_status": "pending_local_review", "vision_label": "pending_local_review"})
+        row["original_url"] = row["url"]
         sniff = sniff_resource(row["url"], timeout=min(PROBE_TIMEOUT, 8))
+        row["sniff_input_url"] = row["url"]
         row["sniff_status"] = sniff["sniff_status"]
         row["sniff_resource_type"] = sniff["resource_type"]
         row["sniff_content_type"] = sniff["content_type"]
@@ -224,16 +249,7 @@ def main():
                 result.update({"variant_url": target["url"], "variant_width_hint": target["width"],
                                "variant_height_hint": target["height"], "variant_bandwidth": target["bandwidth"]})
                 probes.append(result)
-            passing = [item for item in probes if item.get("technical_status") == "pass"]
-            if passing:
-                selected = max(passing, key=lambda item: (item.get("height", 0), item.get("width", 0),
-                                                          item.get("variant_bandwidth", 0)))
-                row.update(selected)
-                row["technical_reason"] = "a discovered HLS variant passed measured resolution checks"
-            else:
-                row.update(probes[0])
-                row["variant_probe_count"] = len(probes)
-                row["variant_probe_failures"] = [item.get("technical_reason", "") for item in probes]
+            apply_selected_probe(row, probes, sniff["resource_type"])
         else:
             row.update(probe_stream(row))
         if row["technical_status"] == "pass":
