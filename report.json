@@ -1,0 +1,40 @@
+{
+  "generated_at_utc": "2026-10-31T18:41:35.775199+00:00",
+  "probe_workers": 8,
+  "pipeline": "cloud_technical_prescreen_only",
+  "final_approval": false,
+  "local_visual_review_required": true,
+  "sources": [
+    {
+      "url": "https://iptv-org.github.io/iptv/index.m3u",
+      "status": "ok",
+      "candidates": 11341,
+      "rejected_by_url_policy": 0
+    }
+  ],
+  "notes": [
+    "This report is a candidate feed, not a final approved channel list.",
+    "Local Ollama multi-frame review and trusted-reference checks are mandatory.",
+    "Private, loopback, link-local, reserved IP literals and local-only hostnames are excluded by URL policy.",
+    "URL policy is defense-in-depth; it does not guarantee safety against public host redirects or DNS rebinding."
+  ],
+  "candidate_limit_applied_to_probing": 300,
+  "source_candidates_total": 11341,
+  "unique_candidates": 11341,
+  "candidates_processed": 300,
+  "candidates_published_all": 11341,
+  "url_policy_rejections": 0,
+  "finished_at_utc": "2026-10-31T18:44:27.795988+00:00",
+  "technical_pass_count": 156,
+  "pending_local_review_count": 300,
+  "output_files": [
+    "all.m3u",
+    "hd.m3u",
+    "all_candidates.m3u",
+    "technical_pass.m3u",
+    "candidates.csv",
+    "report.json"
+  ],
+  "csv_scope": "deterministic evenly distributed sample selected for technical probing",
+  "all_candidates_m3u_scope": "all unique playlist URLs collected from configured sources after URL policy filtering"
+}
